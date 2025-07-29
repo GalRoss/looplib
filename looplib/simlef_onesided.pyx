@@ -17,10 +17,12 @@ from libc.stdlib cimport rand, srand, RAND_MAX
 srand(0)
 np.random.seed()
 
+# generates N random numbers between 0 and N_MAX
 cdef inline np.int64_t rand_int(int N_MAX):
     return np.random.randint(N_MAX)
     #return rand() % N_MAX
 
+# Defining simple python functions that will be called often on a "C-level"
 cdef inline np.float64_t rand_exp(np.float64_t mean):
     return np.random.exponential(mean) if mean > 0 else 0
 
@@ -47,15 +49,16 @@ cdef inline int64not(np.int64_t x):
         return 0
 
 cdef class System:
-    cdef np.int64_t L
-    cdef np.int64_t N
-    cdef np.float64_t time
+    # Declaring variables 
+    cdef np.int64_t L           # Lattice Size(?)
+    cdef np.int64_t N           # Number of Loci
+    cdef np.float64_t time      # Walk time(?)
 
     # vels have 4*N elements
-    # 0:N - outer steps (<-) for left legs 
-    # N:2N - inner steps (<-) of right legs 
-    # 2N:3N - inner steps (->) for left legs 
-    # 3N:4N - outer steps (->) for right legs
+    # 0:N       - outer steps (<-) for left legs 
+    # N:2N      - inner steps (<-) for right legs 
+    # 2N:3N     - inner steps (->) for left legs 
+    # 3N:4N     - outer steps (->) for right legs
     cdef np.float_t [:] vels
 
     cdef np.float_t [:] legswitchrates 
@@ -79,9 +82,9 @@ cdef class System:
             init_locs=None,
             perms=None):
         self.L = L
-        self.N = N
-        self.lattice = -1 * np.ones(L, dtype=np.int64)
-        self.locs = -1 * np.ones(2*N, dtype=np.int64)
+        self.N = N  # Number of loop extruders
+        self.lattice = -1 * np.ones(L, dtype=np.int64)  # Number of Locii
+        self.locs = -1 * np.ones(2*N, dtype=np.int64)   # The 2N legs positions!
         self.vels = vels
 
         self.legswitchrates = legswitchrates
@@ -228,11 +231,11 @@ cdef regenerate_event(System system, Event_heap evheap, np.int64_t event_idx):
     modified.
 
     Possible events:
-    0 to 2N-1 : a step to the left
-    2N to 4N-1 : a step to the right
-    4N to 5N-1 : switch leading leg 
-    5N to 6N-1 : passive unbinding
-    6N to 7N-1 : rebinding to a randomly chosen site
+    0 to 2N-1   : a step to the left
+    2N to 4N-1  : a step to the right
+    4N to 5N-1  : switch leading leg 
+    5N to 6N-1  : passive unbinding
+    6N to 7N-1  : rebinding to a randomly chosen site
     """
 
     cdef np.int64_t leg_idx, loop_idx
@@ -306,7 +309,7 @@ cdef regenerate_all_loop_events(
     Regenerate all possible events for a loop. Includes the four possible motions
     leading leg switching, passive unbinding and rebinding.
     """
-
+    # Note, loop_idx is between [0,...,N-1]!!!
     regenerate_event(system, evheap, loop_idx)
     regenerate_event(system, evheap, loop_idx + system.N)
     regenerate_event(system, evheap, loop_idx + 2 * system.N)

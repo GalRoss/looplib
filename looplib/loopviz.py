@@ -11,6 +11,7 @@ def plot_interaction(
     height_factor=1.0,
     max_height=100,
     height=None,
+    ax = None, # Added because of CoPilot
     y=0,
     plot_text=True,
     color='tomato',
@@ -31,6 +32,8 @@ def plot_interaction(
     alpha (float, optional): The transparency of the arc. Defaults to 0.45.
     lw (int, optional): The line width of the arc. Defaults to 5.
     """
+    if ax is None:
+        ax = plt.gca()
     arc_center = ((l+r)/2,y)
     arc_height = (min(max_height, (r-l)/2.0*height_factor)
                   if (height is None) else height)
@@ -43,10 +46,11 @@ def plot_interaction(
             lw=lw,
             color=color,
             capstyle='round')
-    plt.gca().add_artist(arc)
+    ax.add_artist(arc)
+    #plt.gca().add_artist(arc)
 
-    if label and arc_center[0] < plt.xlim()[1] and plot_text:
-        plt.text(x=arc_center[0],
+    if label and arc_center[0] < ax.get_xlim()[1] and plot_text:
+        ax.text(x=arc_center[0],
                  y=arc_center[1]+arc_height/2+20,
                  horizontalalignment='center',
                  verticalalignment='center',
@@ -105,7 +109,8 @@ def set_ticks(L, site_width_bp=200, tick_spacing_bp=1e6,):
 def plot_lefs(
         l_sites, 
         r_sites, 
-        colors='tomato',
+        colors='tomato', 
+        ax = None,  # Added under CoPilot's suggestions
         **kwargs):
     """Plot an arc diagram for a list of loops.
 
@@ -116,7 +121,8 @@ def plot_lefs(
     **kwargs: Additional keyword arguments to be passed to the plot_interaction function.
 
     """
-    
+    if ax is None:
+        ax = plt.gca()
     n_lefs = looptools.stack_lefs(np.vstack([l_sites,r_sites]).T)
     for i in range(l_sites.size):
         plot_interaction(
@@ -124,6 +130,7 @@ def plot_lefs(
             r_sites[i],
             n_lefs[i],
             color=colors[i] if (type(colors) in (list, tuple, np.ndarray)) else colors,
+            ax = ax,
             **kwargs)
 
 

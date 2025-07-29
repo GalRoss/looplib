@@ -64,21 +64,21 @@ cdef class System:
 
     def __cinit__(self, L, N, vels, lifespans, rebinding_times,
                   init_locs=None, perms=None):
-        self.L = L
-        self.N = N
-        self.lattice = -1 * np.ones(L, dtype=np.int64)
-        self.locs = -1 * np.ones(4*N, dtype=np.int64)
-        self.vels = vels
-        self.lifespans = lifespans
-        self.rebinding_times = rebinding_times
+        self.L                  = L
+        self.N                  = N
+        self.lattice            = -1 * np.ones(L, dtype=np.int64)
+        self.locs               = -1 * np.ones(4*N, dtype=np.int64)     # NOTE: Should be 2N??? Check how to get rid of centers / 4N size
+        self.vels               = vels
+        self.lifespans          = lifespans
+        self.rebinding_times    = rebinding_times
 
         if perms is None:
             self.perms = np.ones(L+1, dtype=np.float64)
         else:
             self.perms = perms
 
-        self.perms[0] = 0.0
-        self.perms[-1] = 0.0
+        self.perms[0]   = 0.0
+        self.perms[-1]  = 0.0
 
         cdef np.int64_t i
 
@@ -96,24 +96,31 @@ cdef class System:
         """
         The variable `direction` can only take values +1 or -1.
         """
-
+        # Computes new position of a leg, given the leg's index and the moving direction
         cdef np.int64_t new_pos = self.locs[leg_idx] + direction
+        # Applies the "move_leg" methods, which check if the leg can actually be moved into its new position/ can it make a step?
         return self.move_leg(leg_idx, new_pos)
 
     cdef np.int64_t move_leg(System self, np.int64_t leg_idx, np.int64_t new_pos):
+        """
+        Actually moves the leg, if the new position is valid. NOTE: Might be where we need to apply periodic boundary conditions!
+        """
         if (new_pos >= 0) and (self.lattice[new_pos] >=0):
             return 0
 
         cdef np.int64_t prev_pos
-
+        # Save previous position of the leg_idx, and update the new one
         prev_pos = self.locs[leg_idx]
         self.locs[leg_idx] = new_pos
-
+        # Check if the previous position is attached ()>= 0)
         if prev_pos >= 0:
+            # Checking for inconsistencies: Leg appears attached but occupancy of previous position is 0!
             if self.lattice[prev_pos] < 0:
-                return 0
+                return 0        # Return 0 = DO NOTHING
+            # Here, we are with an attached leg the moves along, so the previous position's occupancy is set to 0
             self.lattice[prev_pos] = -1
 
+        # Regardless of if the previous position is on the genome or detached, if the new position is on the genome we update the occupancy 
         if new_pos >= 0:
             self.lattice[new_pos] = leg_idx
 
@@ -529,7 +536,7 @@ cpdef simulate(p, verbose=True):
         if system.time > prev_snapshot_t + T_MAX / N_SNAPSHOTS:
             prev_snapshot_t = system.time
             l_sites_traj[snapshot_idx] = system.locs[:N]
-            r_sites_traj[snapshot_idx] = system.locs[N:]
+            r_sites_traj[snapshot_idx] = system.locs[N:] #NOTE: CHECK
             ts_traj[snapshot_idx] = system.time
             snapshot_idx += 1
             if verbose and (snapshot_idx % 10 == 0):

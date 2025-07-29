@@ -16,6 +16,7 @@ from libc.stdlib cimport rand, srand, RAND_MAX
 srand(0)
 np.random.seed()
 
+# Definition of variables for "C++" compilation
 cdef inline np.int64_t rand_int(int N_MAX):
     return np.random.randint(N_MAX)
     #return rand() % N_MAX
@@ -45,34 +46,40 @@ cdef inline int64not(np.int64_t x):
     else:
         return 0
 
+# Definition of Main Class
 cdef class System:
-    cdef np.int64_t L
-    cdef np.int64_t N
-    cdef np.float64_t time
+    cdef np.int64_t L                       # Length of the Lattice = Number of Locii
+    cdef np.int64_t N                       # Number of Loop Extruders
+    cdef np.float64_t time                  # Current simulation time, the variable that gets updated when a event is accepted
 
-    cdef np.float_t [:] vels
-    cdef np.float_t [:] lifespans
-    cdef np.float_t [:] rebinding_times
-    cdef np.float_t [:] perms
+    cdef np.float_t [:] vels                # Velocities: array of step rates
+    cdef np.float_t [:] lifespans           # Mean lifetimes of LEs. Unbiding rate  
+    cdef np.float_t [:] rebinding_times     # Rebinding rates of LEs
+    cdef np.float_t [:] perms               # Permeabilities: Allows for making sites that can't be passed
+                                            # NOTE: Useful for forcing unbinding at Ter
 
-    cdef np.int64_t [:] lattice
-    cdef np.int64_t [:] locs
+    # Location variables. The two are interchangeable, as they contain the same information as a whole, but they allow
+    # for easier access to different "measureables"
+    cdef np.int64_t [:] lattice             # array indicating which legs is at each site. -1 if empty: lattice = [-1 -1 1 -1 2 3 -1 -1 4] 
+    cdef np.int64_t [:] locs                # Array with current positions of all legs. -1 if detached: locs = [2 4 5 8] for the 4 legs of the 2 loop extruders
 
     def __cinit__(self, L, N, vels, lifespans, rebinding_times,
                   init_locs=None, perms=None):
         self.L = L
         self.N = N
-        self.lattice = -1 * np.ones(L, dtype=np.int64)
-        self.locs = -1 * np.ones(2*N, dtype=np.int64)
+        self.lattice = -1 * np.ones(L, dtype=np.int64)  # Initialize empty lattice
+        self.locs = -1 * np.ones(2*N, dtype=np.int64)   # Initialize empty locations
         self.vels = vels
         self.lifespans = lifespans
         self.rebinding_times = rebinding_times
 
         if perms is None:
-            self.perms = np.ones(L+1, dtype=np.float64)
+            self.perms = np.ones(L+1, dtype=np.float64)   # If permeability isnt specified - uniform
         else:
             self.perms = perms
 
+        # Boundary conditions: Blocks legs at the edges
+        # NOTE: Might need to eliminate or change for PBC
         self.perms[0] = 0.0
         self.perms[-1] = 0.0
 
@@ -81,6 +88,7 @@ cdef class System:
         # Initialize non-random loops
         for i in range(2 * self.N):
             # Check if the loop is preinitialized.
+            # NOTE: I think it wont work well if the init_locs = None, but it is NOT the case in the usual usage within "simulate"
             if (init_locs[i] < 0):
                 continue
 
@@ -170,8 +178,11 @@ cdef class Event_heap:
         'Add a new event or update the time of an existing event.'
         if event_idx in self.entry_finder:
             self.remove_event(event_idx)
+        # Uses Event_t class to define new event
         cdef Event_t entry = Event_t(time, event_idx)
+        # Updates the dictionary: "event_idx" = Event_t
         self.entry_finder[event_idx] = entry
+        # Adds entry to the heap "list" NOTE: still not super sure what is changed here
         heappush(self.heap, entry)
 
     cdef remove_event(Event_heap self, np.int64_t event_idx):
@@ -301,20 +312,19 @@ cdef np.int64_t do_event(System system, Event_heap evheap, np.int64_t event_idx)
         else:
             leg_idx = event_idx - 2 * system.N
             direction = 1
-
+            
         prev_pos = system.locs[leg_idx]
         # check if the loop was attached to the chromatin
         status = 1
         if (prev_pos >= 0):
             # make a step only if there is no boundary and the new position is unoccupied
-            if (system.perms[prev_pos + (direction + 1) // 2] > 0):
-                if system.lattice[prev_pos+direction] < 0:
+            if (system.perms[prev_pos + (direction + 1) // 2] > 0):     # Checks for boundary through permeability!
+                if system.lattice[prev_pos+direction] < 0:              # Checks if the new position is empty
                     status *= system.make_step(leg_idx, direction)
                     # regenerate events for the previous and the new neighbors
                     regenerate_neighbours(system, evheap, prev_pos)
                     regenerate_neighbours(system, evheap, prev_pos+direction)
-
-            # regenerate the performed event
+            # regenerate the performed event( "move leg number 42 in +1" was popped out of heap, now we need to account for it happening again)
             regenerate_event(system, evheap, event_idx)
 
     elif (event_idx >= 4 * system.N) and (event_idx < 5 * system.N):
@@ -410,6 +420,7 @@ cpdef simulate(p, verbose=True):
                       are evenly distributed between 0 and T_MAX.
 
     '''
+    # Loading variables from the p dictionary
     cdef char* PROCESS_NAME = p['PROCESS_NAME']
 
     cdef np.int64_t L = p['L']
@@ -418,53 +429,65 @@ cpdef simulate(p, verbose=True):
     cdef np.int64_t N_SNAPSHOTS = p['N_SNAPSHOTS']
 
     cdef np.int64_t i
-
+    # Initializing the empty arrays for the events rates
     cdef np.float64_t [:] VELS = np.zeros(4*N, dtype=np.float64)
     cdef np.float64_t [:] LIFESPANS = np.zeros(N, dtype=np.float64)
     cdef np.float64_t [:] REBINDING_TIMES = np.zeros(N, dtype=np.float64)
 
     for i in range(N):
+        # 0 to 2N-1 are the left legs:      [0,N-1]   is left leg Extending   : direction -1
+        #                                   [N,2N-1]  is left leg "Shrinking" : direction +1
+        # 2N to 4N-1 are the right legs:    [2N,3N-1] is right leg "Shrinking": direction -1
+        #                                   [3N,4N-1] is right leg Extending  : direction +1
         VELS[i] =   VELS[i+3*N] = p['R_EXTEND'][i] if type(p['R_EXTEND']) in (list, np.ndarray) else p['R_EXTEND']
         VELS[i+N] = VELS[i+2*N] = p['R_SHRINK'][i] if type(p['R_SHRINK']) in (list, np.ndarray) else p['R_SHRINK']
+        # The lifetime is 1/"falling off rate"
         LIFESPANS[i] = (1.0 / p['R_OFF'][i]) if type(p['R_OFF']) in (list, np.ndarray) else 1.0 / p['R_OFF']
         REBINDING_TIMES[i] = (
             (p['REBINDING_TIME'][i])
             if type(p.get('REBINDING_TIME',0)) in (list, np.ndarray)
             else p.get('REBINDING_TIME',0))
-
+    # By default all initial locations are -1 = all legs are detached! Except if specified
     cdef np.int64_t [:] INIT_LOCS = (-1) * np.ones(2*N, dtype=np.int64)
     if ('INIT_L_SITES' in p) and ('INIT_R_SITES' in p):
         for i in range(N):
             INIT_LOCS[i] = p['INIT_L_SITES'][i]
             INIT_LOCS[i+N] = p['INIT_R_SITES'][i]
-
+    # Activation times: When does each LEF enter the system
     cdef np.float64_t [:] ACTIVATION_TIMES = p.get('ACTIVATION_TIMES',
         np.zeros(N, dtype=np.float64))
 
+    # "Sanity Check": If left leg is attached, so is right leg, and activate at t=0. If left leg is detached, make sure
+    # right leg is too.
     for i in range(N):
         if INIT_LOCS[i] != -1:
-            assert (INIT_LOCS[i+N] != -1)
+            assert (INIT_LOCS[i+N] != -1)       
             assert ACTIVATION_TIMES[i] == 0
         else:
             assert (INIT_LOCS[i+N] == -1)
 
+    # Load 
     cdef np.float_t [:] PERMS = p.get('PERMS', None)
     if (not (PERMS is None)) and (PERMS.size != L+1):
         raise Exception(
             'The length of the provided array of permeabilities should be L+1')
 
+    # Using the C++ System class to: Define the system parameters from p dictionary, the make_step and check_system methods
     cdef System system = System(L, N, VELS, LIFESPANS, REBINDING_TIMES, INIT_LOCS, PERMS)
 
+    # Memory allocation for C++
     cdef np.int64_t [:,:] l_sites_traj = np.zeros((N_SNAPSHOTS, N), dtype=np.int64)
     cdef np.int64_t [:,:] r_sites_traj = np.zeros((N_SNAPSHOTS, N), dtype=np.int64)
     cdef np.float64_t [:] ts_traj = np.zeros(N_SNAPSHOTS, dtype=np.float64)
 
     cdef np.int64_t last_event = 0
 
+    # Initialize
     cdef np.float64_t prev_snapshot_t = 0
     cdef np.float64_t tot_rate = 0
     cdef np.int64_t snapshot_idx = 0
 
+    # Memory allocation of Event_heap class
     cdef Event_heap evheap = Event_heap()
 
     # Move LEFs onto the lattice at the corresponding activations times.
