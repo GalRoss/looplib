@@ -34,9 +34,10 @@ setup(
     url='https://github.com/golobor/looplib/',
     packages=['looplib'],
     install_requires=install_requires,
-    ext_modules = cythonize(['looplib/simlef.pyx',
-                             'looplib/simlef_twosided.pyx',
-                             'looplib/simlef_onesided.pyx',
-                             'looplib/looptools_c.pyx']),
+    ext_modules = cythonize(['looplib/simlef_bypass_loadist.pyx',
+                            'looplib/simlef.pyx',
+                            'looplib/simlef_twosided.pyx',
+                            'looplib/simlef_onesided.pyx',
+                            'looplib/looptools_c.pyx']),
     include_dirs=[np.get_include()]
 )

@@ -19,6 +19,7 @@ np.random.seed()
 # Definition of variables for "C++" compilation
 cdef inline np.int64_t rand_int(int N_MAX):
     return np.random.randint(N_MAX)
+
 # Function to set loading probabilities profile. requires weights of sites and the occupied sites. Returns loading site index.    
 cdef inline np.int64_t sample_loading_point(np.float_t [:] weights, np.int64_t [:] occupied):
     cdef np.int64_t [:] inds = np.arange(len(weights))
@@ -28,7 +29,7 @@ cdef inline np.int64_t sample_loading_point(np.float_t [:] weights, np.int64_t [
     for i in occupied:
         if i >= 0:
             ps[i] = 0
-
+    # Normalize the probabilities based on loading in EMPTY sites
     ps /= np.sum(ps)
 
     return np.random.choice(inds, p=ps)
@@ -77,20 +78,18 @@ cdef class System:
                                             # NOTE: now twice longer: 0:L-1 are left moving legs, L:2L-1 are right moving legs
                                             # NOTE: stall when opposite directions meet, dont allow overtaking!
     cdef np.int64_t [:] locs                # Array with current positions of all legs. -1 if detached: locs = [2 4 5 8] for the 4 legs of the 2 loop extruders
-
     # NOTE:Janni added these
     cdef np.float_t [:] binding_affinities      # Relative binding affinities; higher values mean more likely to bind
     cdef np.float_t [:] unbinding_rates         # Unbinding rates for each site   
 
-    def __cinit__(self, L, N, vels, rebinding_times, unbinding_rates, bypass_rate, lifespans,
-                  init_locs=None, perms=None, binding_rates=None):
+    def __cinit__(self, L, N, vels, rebinding_times, unbinding_rates, bypass_rate,
+                init_locs=None, perms=None, binding_rates=None):
         self.L                  = L
         self.N                  = N
         self.bypass_rate        = bypass_rate
         self.lattice            = -1 * np.ones(2*L, dtype=np.int64)  #-1 means unoccupied. 0:L-1 are for left moving, L:2L-1 are for right moving.
         self.locs               = -1 * np.ones(2*N, dtype=np.int64)   # Initialize empty locations
         self.vels               = vels
-        self.lifespans          = lifespans
         self.rebinding_times    = rebinding_times
         self.unbinding_rates    = unbinding_rates
 
@@ -99,58 +98,88 @@ cdef class System:
         else:
             self.perms = perms
 
-        # Boundary conditions: Blocks legs at the edges
-        # NOTE: Might need to eliminate or change for PBC
-        self.perms[0] = 0.0
-        self.perms[-1] = 0.0
+        if binding_rates is None:
+            self.binding_rates=np.ones(L, dtype=np.float64)
+        else:
+            self.binding_affinities=binding_rates
 
         cdef np.int64_t i
 
         # Initialize non-random loops
-        for i in range(2 * self.N):
+        # First we treat the left legs, moving left (Expanding)
+        for i in range(self.N):
             # Check if the loop is preinitialized.
-            # NOTE: I think it wont work well if the init_locs = None, but it is NOT the case in the usual usage within "simulate"
             if (init_locs[i] < 0):
                 continue
 
             # Populate a site.
             self.locs[i] = init_locs[i]
-            self.lattice[self.locs[i]] = i
+            self.lattice[self.locs[i]]=i #left moving; first half of array
+        # Then we check for right legs, moving right (Expanding)
+        for i in range(self.N, 2 * self.N):
+            # Check if the loop is preinitialized.
+            if (init_locs[i] < 0):
+                continue
+
+            # Populate a site.
+            self.locs[i] = init_locs[i]
+            self.lattice[self.locs[i]+self.L]=i #right moving; second half of array
 
     cdef np.int64_t make_step(System self, np.int64_t leg_idx, np.int64_t direction):
         """
         The variable `direction` can only take values +1 or -1.
         """
 
-        cdef np.int64_t new_pos = self.locs[leg_idx] + direction
+        cdef np.int64_t new_pos = (self.locs[leg_idx] + direction+self.L)%self.L #periodic for bacteria. within (0,L-1)
         return self.move_leg(leg_idx, new_pos)
 
-    cdef np.int64_t move_leg(System self, np.int64_t leg_idx, np.int64_t new_pos):
-        if (new_pos >= 0) and (self.lattice[new_pos] >=0):
-            return 0
+cdef np.int64_t move_leg(System self, np.int64_t leg_idx, np.int64_t new_pos):
+    """
+    Move a leg (leg_idx) to a new position (new_pos) on the lattice.
+    The lattice is split into two halves:
+      - [0:L-1]: left-moving legs
+      - [L:2L-1]: right-moving legs
+    This allows direction-specific occupancy and bypassing rules.
+    Returns 1 if move is successful, 0 if move is blocked or inconsistent.
+    """
+    cdef np.int64_t lattice_increment
+    cdef np.int64_t prev_pos 
 
-        cdef np.int64_t prev_pos
+    # Which half of the lattice to use for this leg?
+    if leg_idx >= self.N:
+        lattice_increment = self.L
+    else:
+        lattice_increment = 0
 
-        prev_pos = self.locs[leg_idx]
-        self.locs[leg_idx] = new_pos
+    # Check if the target site (new_pos + lattice_increment) is already occupied and new_pos is not -1 "detached"
+    if (new_pos >= 0) and (self.lattice[new_pos + lattice_increment] >= 0):
+        return 0  # Move fails: site is occupied.
 
-        if prev_pos >= 0:
-            if self.lattice[prev_pos] < 0:
-                return 0
-            self.lattice[prev_pos] = -1
+    # Save the previous position of this leg.
+    prev_pos = self.locs[leg_idx]
+    # Update the leg's position to the new site.
+    self.locs[leg_idx] = new_pos
 
-        if new_pos >= 0:
-            self.lattice[new_pos] = leg_idx
+    # If the leg was previously on the lattice, clear its old site.
+    if prev_pos >= 0:
+        if self.lattice[prev_pos + lattice_increment] < 0:
+            return 0  # Inconsistency: old site should have been occupied.
+        self.lattice[prev_pos + lattice_increment] = -1  # Mark old site as empty.
 
-        return 1
+    # If the new position is valid, mark it as occupied by this leg.
+    if new_pos >= 0:
+        self.lattice[new_pos + lattice_increment] = leg_idx
+
+    return 1  # Move successful.
 
     cdef np.int64_t check_system(System self):
         okay = 1
         cdef np.int64_t i
         for i in range(self.N):
-            if (self.locs[i] == self.locs[i+self.N]):
-                print('loop ' , i, 'has both legs at ', self.locs[i])
-                okay = 0
+            # NOTE: We allow bypassing so this is not a problem
+            #if (self.locs[i] == self.locs[i+self.N]):
+            #   print('loop ' , i, 'has both legs at ', self.locs[i])
+            #   okay = 0
             if (self.locs[i] >= self.L):
                 print('leg ', i, 'is located outside of the system: ', self.locs[i])
                 okay = 0
@@ -238,10 +267,15 @@ cdef regenerate_event(System system, Event_heap evheap, np.int64_t event_idx):
     """
 
     cdef np.int64_t leg_idx, loop_idx
-    cdef np.int64_t direction
+    cdef np.int64_t direction, lattice_increment
+    cdef np.int64_t pos1, pos2
     cdef np.float_t local_vel
+    cdef np.int64_t new_position
+    cdef np.float_t rate_unbind
 
-    # A step to the left or to the right.
+    # A step to the left or to the right. Don't overtake when moving in the same direction. But can bypass moving in opposite direction.
+    # 0 to 2N-1 : a step to the left
+    # 2N to 4N-1 : a step to the right
     if (event_idx < 4 * system.N) :
         if event_idx < 2 * system.N:
             leg_idx = event_idx

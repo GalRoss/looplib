@@ -8,6 +8,7 @@ cimport cython
 import numpy as np
 cimport numpy as np
 
+#mport numpy as np
 from cpython cimport bool
 from heapq import heappush, heappop
 
@@ -15,9 +16,11 @@ from libc.stdlib cimport rand, srand, RAND_MAX
 srand(0)
 np.random.seed()
 
+# Definition of variables for "C++" compilation
 cdef inline np.int64_t rand_int(int N_MAX):
     return np.random.randint(N_MAX)
 
+# Function to set loading probabilities profile. requires weights of sites and the occupied sites. Returns loading site index.    
 cdef inline np.int64_t sample_loading_point(np.float_t [:] weights, np.int64_t [:] occupied):
     cdef np.int64_t [:] inds = np.arange(len(weights))
     cdef np.float64_t [:] ps =np.copy(weights)
@@ -26,7 +29,7 @@ cdef inline np.int64_t sample_loading_point(np.float_t [:] weights, np.int64_t [
     for i in occupied:
         if i >= 0:
             ps[i] = 0
-
+    # Normalize the probabilities based on loading in EMPTY sites
     ps /= np.sum(ps)
 
     return np.random.choice(inds, p=ps)
@@ -35,6 +38,7 @@ cdef inline np.float64_t rand_exp(np.float64_t mean):
     return np.random.exponential(mean) if mean > 0 else 0
 
 cdef inline float rand_float():
+    #return np.random.random()
     return rand() / float(RAND_MAX)
 
 cdef inline int64sign(np.int64_t x):
@@ -55,37 +59,42 @@ cdef inline int64not(np.int64_t x):
     else:
         return 0
 
+# Definition of Main Class
 cdef class System:
-    cdef np.int64_t L
-    cdef np.int64_t N
-    cdef np.float64_t time
-    cdef np.float64_t bypass_rate #rate at which LEFs can move to occupied sites
+    cdef np.int64_t L                       # Length of the Lattice = Number of Locii
+    cdef np.int64_t N                       # Number of Loop Extruders
+    cdef np.float64_t time                  # Current simulation time, the variable that gets updated when a event is accepted
+    cdef np.float64_t bypass_rate           # Rate at which LEFs can bypass occupied sites
 
-    cdef np.float_t [:] vels
-    cdef np.float_t [:] lifespans
-    cdef np.float_t [:] rebinding_times
-    cdef np.float_t [:] perms
+    cdef np.float_t [:] vels                # Velocities: array of step rates
+    cdef np.float_t [:] lifespans           # Mean lifetimes of LEs. Unbiding rate  
+    cdef np.float_t [:] rebinding_times     # Rebinding rates of LEs
+    cdef np.float_t [:] perms               # Permeabilities: Allows for making sites that can't be passed
+                                            # NOTE: Useful for forcing unbinding at Ter
 
-    cdef np.int64_t [:] lattice #now two times as long; 0:L-1 are for left moving, L:2L-1 are for right moving.
-                                #stall when moving in opposite directions meet. Don't allow overtaking when moving in the same direction.
-    cdef np.int64_t [:] locs
-
-    cdef np.float_t [:] binding_affinities #relative binding affinities; higher values mean more likely to bind
-    cdef np.float_t [:] unbinding_rates #unbinding rates for each site
+    # Location variables. The two are interchangeable, as they contain the same information as a whole, but they allow
+    # for easier access to different "measureables"
+    cdef np.int64_t [:] lattice             # Array indicating which legs is at each site. -1 if empty: lattice = [-1 -1 1 -1 2 3 -1 -1 4]
+                                            # NOTE: now twice longer: 0:L-1 are left moving legs, L:2L-1 are right moving legs
+                                            # NOTE: stall when opposite directions meet, dont allow overtaking!
+    cdef np.int64_t [:] locs                # Array with current positions of all legs. -1 if detached: locs = [2 4 5 8] for the 4 legs of the 2 loop extruders
+    # NOTE:Janni added these
+    cdef np.float_t [:] binding_affinities      # Relative binding affinities; higher values mean more likely to bind
+    cdef np.float_t [:] unbinding_rates         # Unbinding rates for each site   
 
     def __cinit__(self, L, N, vels, rebinding_times, unbinding_rates, bypass_rate,
-                  init_locs=None, perms=None, binding_rates=None):
-        self.L = L
-        self.N = N
-        self.bypass_rate = bypass_rate
-        self.lattice = -1*np.ones(2*L, dtype=np.int64) #-1 means unoccupied. 0:L-1 are for left moving, L:2L-1 are for right moving.
-        self.locs = -1 * np.ones(2*N, dtype=np.int64)
-        self.vels = vels
-        self.rebinding_times = rebinding_times
-        self.unbinding_rates=unbinding_rates
+                init_locs=None, perms=None, binding_rates=None):
+        self.L                  = L
+        self.N                  = N
+        self.bypass_rate        = bypass_rate
+        self.lattice            = -1 * np.ones(2*L, dtype=np.int64)  #-1 means unoccupied. 0:L-1 are for left moving, L:2L-1 are for right moving.
+        self.locs               = -1 * np.ones(2*N, dtype=np.int64)   # Initialize empty locations
+        self.vels               = vels
+        self.rebinding_times    = rebinding_times
+        self.unbinding_rates    = unbinding_rates
 
         if perms is None:
-            self.perms = np.ones(L+1, dtype=np.float64)
+            self.perms = np.ones(L+1, dtype=np.float64)   # If permeability isnt specified - uniform
         else:
             self.perms = perms
 
@@ -97,6 +106,7 @@ cdef class System:
         cdef np.int64_t i
 
         # Initialize non-random loops
+        # First we treat the left legs, moving left (Expanding)
         for i in range(self.N):
             # Check if the loop is preinitialized.
             if (init_locs[i] < 0):
@@ -105,7 +115,7 @@ cdef class System:
             # Populate a site.
             self.locs[i] = init_locs[i]
             self.lattice[self.locs[i]]=i #left moving; first half of array
-
+        # Then we check for right legs, moving right (Expanding)
         for i in range(self.N, 2 * self.N):
             # Check if the loop is preinitialized.
             if (init_locs[i] < 0):
@@ -132,7 +142,7 @@ cdef class System:
         else:
             lattice_increment=0
 
-        if (new_pos >= 0) and (self.lattice[new_pos+lattice_increment] >=0): #if moving to an occupied site
+        if (new_pos >= 0) and (self.lattice[new_pos + lattice_increment] >= 0): #if moving to an occupied site
             return 0
 
         if (new_pos>self.L-1): #if moving outside of the system
