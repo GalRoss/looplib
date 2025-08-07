@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: looplib_bacterial
+Version: 0.1
+Summary: looplib by Anton Goloborodko, edited for circular bacterial chromosomes
+Requires-Dist: numpy

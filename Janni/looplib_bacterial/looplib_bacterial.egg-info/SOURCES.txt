@@ -1,0 +1,10 @@
+README.md
+setup.py
+looplib_bacterial/__init__.py
+looplib_bacterial/bacterial_bypassing.c
+looplib_bacterial/bacterial_no_bypassing.c
+looplib_bacterial.egg-info/PKG-INFO
+looplib_bacterial.egg-info/SOURCES.txt
+looplib_bacterial.egg-info/dependency_links.txt
+looplib_bacterial.egg-info/requires.txt
+looplib_bacterial.egg-info/top_level.txt
