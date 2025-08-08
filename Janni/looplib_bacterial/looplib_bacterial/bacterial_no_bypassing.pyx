@@ -69,28 +69,28 @@ cdef class System:
     cdef np.int64_t [:] lattice
     cdef np.int64_t [:] locs
 
-    cdef np.float_t [:] binding_affinities
+    cdef np.float_t [:] loading_probabilities
     cdef np.float_t [:] unbinding_rates
 
     def __cinit__(self, L, N, vels, rebinding_times, unbinding_rates,
-                  init_locs=None, perms=None, binding_rates=None):
-        self.L = L
-        self.N = N
-        self.lattice = -1 * np.ones(L, dtype=np.int64)
-        self.locs = -1 * np.ones(2*N, dtype=np.int64)
-        self.vels = vels
+                init_locs=None, perms=None, loading_probabilities=None):
+        self.L               = L
+        self.N               = N
+        self.lattice         = -1 * np.ones(L, dtype=np.int64)
+        self.locs            = -1 * np.ones(2*N, dtype=np.int64)
+        self.vels            = vels
         self.rebinding_times = rebinding_times
-        self.unbinding_rates=unbinding_rates
+        self.unbinding_rates = unbinding_rates
 
         if perms is None:
             self.perms = np.ones(L+1, dtype=np.float64)
         else:
             self.perms = perms
 
-        if binding_rates is None:
-            self.binding_rates=np.ones(L, dtype=np.float64)
+        if loading_probabilities is None:
+            self.loading_probabilities = np.ones(L, dtype=np.float64)
         else:
-            self.binding_affinities=binding_rates
+            self.loading_probabilities = loading_probabilities
 
         cdef np.int64_t i
 
@@ -377,7 +377,7 @@ cdef np.int64_t do_event(System system, Event_heap evheap, np.int64_t event_idx)
             status = 0
 
         # find a new position for the LEF (now with weights for each position)
-        new_pos = sample_loading_point(system.binding_affinities, system.locs)
+        new_pos = sample_loading_point(system.loading_probabilities, system.locs)
 
         # rebind the loop
         status *= system.move_leg(loop_idx, new_pos)
@@ -404,25 +404,35 @@ cpdef simulate(p, verbose=True):
         PROCESS_NAME : the title of the simulation
         L : the number of sites in the lattice
         N : the number of LEFs
-        R_EXTEND : the rate of loop extension,
-            can be set globally with a float,
-            or individually with an array of floats
-        R_SHRINK : the rate of LEF backsteps,
-            can be set globally with a float,
-            or individually with an array of floats
+
+        BURNING_TIME : Time for system to evolve without saving the results.
+                        If not specified its 0. Janni recommends setting it 
+                        to at least 2x (time for a LEF to pass the whole system)
+
+        R_EXTEND :  the rate of loop extension,
+                    can be set globally with a float,
+                    or individually with an array of floats
+        R_SHRINK :  the rate of LEF backsteps,
+                    can be set globally with a float,
+                    or individually with an array of floats
+
         R_OFF : the rate of detaching from the polymer,
-            can be set globally with a float,
-            or individually with an array of floats
-        R_ON : the rate of attaching to the polymer, per site,
-            can be set globally with a float,
-            or individually with an array of floats
-        REBINDING_TIME : the average time that a LEF spends in solution before
-            rebinding to the polymer; can be set globally with a float,
-            or individually with an array of floats
-        INIT_L_SITES : the initial positions of the left legs of the LEFs,
-                       If -1, the position of the LEF is chosen randomly,
-                       with both legs next to each other. By default is -1 for
-                       all LEFs.
+                can be set globally with a float,
+                or individually with an array of floats
+
+        R_ON :  the rate of attaching to the polymer, per site,
+                can be set globally with a float,
+                or individually with an array of floats
+
+        REBINDING_TIME :    the average time that a LEF spends in solution before
+                            rebinding to the polymer; can be set globally with a float,
+                            or individually with an array of floats
+
+        INIT_L_SITES :  the initial positions of the left legs of the LEFs,
+                        If -1, the position of the LEF is chosen randomly,
+                        with both legs next to each other. By default is -1 for
+                        all LEFs.
+
         INIT_R_SITES : the initial positions of the right legs of the LEFs
         ACTIVATION_TIMES : the times at which the LEFs enter the system.
             By default equals 0 for all LEFs.
@@ -431,44 +441,50 @@ cpdef simulate(p, verbose=True):
 
         T_MAX : the duration of the simulation
         N_SNAPSHOTS : the number of time frames saved in the output. The frames
-                      are evenly distributed between 0 and T_MAX.
+                    are evenly distributed between 0 and T_MAX.
 
     '''
     cdef char* PROCESS_NAME = p['PROCESS_NAME']
 
-    cdef np.int64_t L = p['L']
-    cdef np.int64_t N = np.round(p['N'])
-    cdef np.float64_t T_MAX = p['T_MAX']
+    cdef np.int64_t L           = p['L']
+    cdef np.int64_t N           = np.round(p['N'])
+    cdef np.float64_t T_MAX     = p['T_MAX']
     cdef np.int64_t N_SNAPSHOTS = p['N_SNAPSHOTS']
     cdef np.int64_t BURNIN_TIME = p.get('BURNIN_TIME', 0)
 
     cdef np.int64_t i
 
-    cdef np.float64_t [:] VELS = np.zeros(4*N, dtype=np.float64)
-    cdef np.float64_t [:] UNBINDING_RATES = np.zeros(L, dtype=np.float64)
-    cdef np.float64_t [:] BINDING_RATES = np.ones(L, dtype=np.float64)
-    cdef np.float64_t [:] REBINDING_TIMES = np.zeros(N, dtype=np.float64)
+    cdef np.float64_t [:] VELS                  = np.zeros(4*N, dtype=np.float64)
+    cdef np.float64_t [:] UNBINDING_RATES       = np.zeros(L,   dtype=np.float64)
+    cdef np.float64_t [:] LOADING_PROBABILITIES = np.ones(L,    dtype=np.float64)
+    cdef np.float64_t [:] REBINDING_TIMES       = np.zeros(N,   dtype=np.float64)
 
     for i in range(N):
-        VELS[i] =   VELS[i+3*N] = p['R_EXTEND'][i] if type(p['R_EXTEND']) in (list, np.ndarray) else p['R_EXTEND']
+        # Load velocities of each leg accodring to EXTEND and SHRINK rates.
+        VELS[i]   = VELS[i+3*N] = p['R_EXTEND'][i] if type(p['R_EXTEND']) in (list, np.ndarray) else p['R_EXTEND']
         VELS[i+N] = VELS[i+2*N] = p['R_SHRINK'][i] if type(p['R_SHRINK']) in (list, np.ndarray) else p['R_SHRINK']
+        # Load rebinding times for each LEF: Time spent in solution (By DEFAULT 0)
         REBINDING_TIMES[i] = (
-            (p['REBINDING_TIME'][i])
-            if type(p.get('REBINDING_TIME',0)) in (list, np.ndarray)
-            else p.get('REBINDING_TIME',0))
+                            (p['REBINDING_TIME'][i])
+                            if type(p.get('REBINDING_TIME',0)) in (list, np.ndarray)
+                            else p.get('REBINDING_TIME',0)
+                            )
 
     for i in range(L):
-        UNBINDING_RATES[i] = p['R_OFF'][i] if type(p['R_OFF']) in (list, np.ndarray) else p['R_OFF']
-        BINDING_RATES[i] = p['R_ON'][i] if type(p['R_ON']) in (list, np.ndarray) else p['R_ON']
+        UNBINDING_RATES[i]          = p['R_OFF'][i] if type(p['R_OFF']) in (list, np.ndarray) else p['R_OFF']
+        LOADING_PROBABILITIES[i]    = p['R_ON'][i]  if type(p['R_ON'])  in (list, np.ndarray) else p['R_ON']
 
+    # LEGS LOADING LOCATIONS:
+    # Set all to detached -> Will be loaded next to eachother
     cdef np.int64_t [:] INIT_LOCS = (-1) * np.ones(2*N, dtype=np.int64)
+    # If the initial locations are provided, use them.
     if ('INIT_L_SITES' in p) and ('INIT_R_SITES' in p):
         for i in range(N):
             INIT_LOCS[i] = p['INIT_L_SITES'][i]
             INIT_LOCS[i+N] = p['INIT_R_SITES'][i]
 
-    cdef np.float64_t [:] ACTIVATION_TIMES = p.get('ACTIVATION_TIMES',
-        np.zeros(N, dtype=np.float64))
+    cdef np.float64_t [:] ACTIVATION_TIMES = p.get('ACTIVATION_TIMES', 
+                                                    np.zeros(N, dtype=np.float64))
 
     for i in range(N):
         if INIT_LOCS[i] != -1:
@@ -481,8 +497,8 @@ cpdef simulate(p, verbose=True):
     if (not (PERMS is None)) and (PERMS.size != L+1):
         raise Exception(
             'The length of the provided array of permeabilities should be L+1')
-
-    cdef System system = System(L, N, VELS, REBINDING_TIMES, UNBINDING_RATES, INIT_LOCS, PERMS, BINDING_RATES)
+                        # system(L, N, vels, rebinding_times, unbinding_rates, init_locs, perms, loading_probabilities)
+    cdef System system = System(L, N, VELS, REBINDING_TIMES, UNBINDING_RATES, INIT_LOCS, PERMS, LOADING_PROBABILITIES)
 
     cdef np.int64_t [:,:] l_sites_traj = np.zeros((N_SNAPSHOTS, N), dtype=np.int64)
     cdef np.int64_t [:,:] r_sites_traj = np.zeros((N_SNAPSHOTS, N), dtype=np.int64)
