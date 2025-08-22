@@ -72,6 +72,9 @@ cdef class System:
     cdef np.float_t [:] loading_probabilities
     cdef np.float_t [:] unbinding_rates
 
+    # Adding Loading-site tracking
+    cdef np.int64_t [:] loading_sites_counts
+
     def __cinit__(self, L, N, vels, rebinding_times, unbinding_rates,
                 init_locs=None, perms=None, loading_probabilities=None):
         self.L               = L
@@ -81,6 +84,7 @@ cdef class System:
         self.vels            = vels
         self.rebinding_times = rebinding_times
         self.unbinding_rates = unbinding_rates
+        self.loading_sites_counts = np.zeros(L, dtype=np.int64)
 
         if perms is None:
             self.perms = np.ones(L+1, dtype=np.float64)
@@ -317,9 +321,8 @@ cdef np.int64_t do_event(System system, Event_heap evheap, np.int64_t event_idx)
 
     cdef np.int64_t status
     cdef np.int64_t new_pos, leg_idx, prev_pos, prev_pos2, direction, loop_idx
-
+    # TAKE A STEP   
     if event_idx < 4 * system.N:
-        # Take a step
         if event_idx < 2 * system.N:
             leg_idx = event_idx
             direction = -1
@@ -343,9 +346,8 @@ cdef np.int64_t do_event(System system, Event_heap evheap, np.int64_t event_idx)
 
             # regenerate the performed event
             regenerate_event(system, evheap, event_idx)
-
+    # UNBINDING
     elif (event_idx >= 4 * system.N) and (event_idx < 5 * system.N):
-        # unbind the loop
         loop_idx = event_idx - 4 * system.N
 
         status = 2
@@ -367,7 +369,7 @@ cdef np.int64_t do_event(System system, Event_heap evheap, np.int64_t event_idx)
         # update the neighbours after the loop has moved
         regenerate_neighbours(system, evheap, prev_pos)
         regenerate_neighbours(system, evheap, prev_pos2)
-
+    # REBINDING
     elif (event_idx >= 5 * system.N) and (event_idx < 6 * system.N):
         loop_idx = event_idx - 5 * system.N
 
@@ -379,6 +381,8 @@ cdef np.int64_t do_event(System system, Event_heap evheap, np.int64_t event_idx)
         # find a new position for the LEF (now with weights for each position)
         new_pos = sample_loading_point(system.loading_probabilities, system.locs)
 
+        # updating loading_site_counts
+        system.loading_sites_counts[new_pos] += 1
         # rebind the loop
         status *= system.move_leg(loop_idx, new_pos)
         status *= system.move_leg(loop_idx+system.N, (new_pos+1)%system.L)
@@ -454,6 +458,9 @@ cpdef simulate(p, verbose=True):
 
     cdef np.int64_t i
 
+    # Added loading-site tracking 
+    cdef np.int64_t   [:] LOADING_SITES_COUNTS  = np.zeros(L, dtype=np.int64)
+    #######
     cdef np.float64_t [:] VELS                  = np.zeros(4*N, dtype=np.float64)
     cdef np.float64_t [:] UNBINDING_RATES       = np.zeros(L,   dtype=np.float64)
     cdef np.float64_t [:] LOADING_PROBABILITIES = np.ones(L,    dtype=np.float64)
@@ -551,9 +558,11 @@ cpdef simulate(p, verbose=True):
         t = system.time
 
     # Main simulation loop
-
     if verbose:
         print(PROCESS_NAME, 'burn in complete, starting the simulation')
+
+    # Resetting the loading-sites counter
+    system.loading_sites_counts = np.zeros(N, dtype=np.int64)
 
     while snapshot_idx < N_SNAPSHOTS:
         event = evheap.pop_event()
@@ -576,4 +585,4 @@ cpdef simulate(p, verbose=True):
                 print(PROCESS_NAME, snapshot_idx, system.time-BURNIN_TIME, T_MAX)
             np.random.seed()
 
-    return np.array(l_sites_traj), np.array(r_sites_traj), np.array(ts_traj)
+    return np.array(l_sites_traj), np.array(r_sites_traj), np.array(ts_traj), np.array(system.loading_sites_counts)
