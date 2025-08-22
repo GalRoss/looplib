@@ -1,0 +1,9 @@
+setup.py
+looplib_bacterial_gal/__init__.py
+looplib_bacterial_gal/bacterial_bypassing.c
+looplib_bacterial_gal/bacterial_no_bypassing.c
+looplib_bacterial_gal.egg-info/PKG-INFO
+looplib_bacterial_gal.egg-info/SOURCES.txt
+looplib_bacterial_gal.egg-info/dependency_links.txt
+looplib_bacterial_gal.egg-info/requires.txt
+looplib_bacterial_gal.egg-info/top_level.txt
