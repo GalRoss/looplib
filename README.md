@@ -10,5 +10,9 @@
     
 - loopviz.py - visualize loops with plot_lefs()
 
-- simlef_twosided.pyx - simulate loops extrusion with synchronized extrusion blocking
+- loopviz_circular.py - visualize loops on the genome with plot_circular_genome_with_loops()
 
+- looplib_bacterial_gal folder:
+    - bacterial_no_bypassing.pyx -  Simulate non-bypassing loop extrusion by LEF with simulate()
+
+- LEF_paths_gen.py - generate LEF paths on the genome several times and save into .h5 files

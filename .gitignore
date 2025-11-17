@@ -41,3 +41,9 @@ dist/
 *.backup
 looplib.egg-info/*
 .ipynb_checkpoints/*
+
+# Data files
+*.csv
+*.h5
+*.parquet
+*.xml

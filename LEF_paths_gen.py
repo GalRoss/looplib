@@ -35,7 +35,7 @@ def check_or_create_directory(directory_path):
         os.makedirs(directory_path)
         print(f"Directory '{directory_path}' created.")
 
-def out_dir_name(bacterium, N, results_dir_label="Test_No_Bypass"):
+def out_dir_name(bacterium, N, results_dir_label="No_Bypass"):
     return results_dir_label + f"_{bacterium['name']}_L_{bacterium['N']}_SMCs_{N}"
 
 
@@ -47,7 +47,24 @@ def save_to_h5(l_sites, r_sites, ts, loading_site_probs, lef_lifetimes, filename
         f.create_dataset('loading_site_probs', data=loading_site_probs)
         f.create_dataset('lef_lifetimes', data=lef_lifetimes)
 
-def run_sims(bacterium, num_smcs, burn_in_time, simulation_time_min, num_sims, output_directory, delta_t_sec = 1, results_dir_label = None):
+def run_sims(bacterium, num_smcs, burn_in_time, simulation_time_min, num_sims, output_directory, delta_t_sec = 1, sim_type = 0, results_dir_label = None):
+    """Runs the LEF simulations and saves the relevant data
+        Input:
+        - bacterium:    Dictionary with all the relevant information about the bacterium
+        - num_smcs:     Number of SMCs on the genome
+        - burn_in_time: Burning time for the simulation to "warm up". Computed in minutes
+        - simulation_time_min: Total simulation time in minutes
+        - num_sims:     Number of simulations
+        - output_directory: Directory where simulation folder will be saved
+        - delta_t_sec:  The value of dt between snapshots in seconds. The time unit of the simulation is minutes, so dt = delta_t_sec / 60
+        - results_dir_label: adds a possible label for the results folder. NOTE: this changes the BEggining of the naming
+    """
+
+    # Bypassing = 1 , No bypassing = 0
+    if sim_type == 1:
+        lef_simulation = bacterial_bypassing
+    else:
+        lef_simulation = bacterial_no_bypassing
     
     delta_t = delta_t_sec/60
 
@@ -79,7 +96,7 @@ def run_sims(bacterium, num_smcs, burn_in_time, simulation_time_min, num_sims, o
         p['PROCESS_NAME'] = b'Test'         # b'proc'
 
         t_start=time.perf_counter()
-        l_sites, r_sites, ts, loading_sites_count, lef_lifetimes = bacterial_no_bypassing.simulate(p, verbose=False) #perform a new simulation
+        l_sites, r_sites, ts, loading_sites_count, lef_lifetimes = lef_simulation.simulate(p, verbose=False) #perform a new simulation
         t_end = time.perf_counter()
 
         print(f"performed sim {i} in {t_end-t_start:0.4f} s")

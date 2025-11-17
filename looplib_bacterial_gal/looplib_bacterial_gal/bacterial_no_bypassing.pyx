@@ -81,16 +81,16 @@ cdef class System:
 
     def __cinit__(self, L, N, vels, rebinding_times, unbinding_rates,
                 init_locs=None, perms=None, loading_probabilities=None):
-        self.L               = L
-        self.N               = N
-        self.lattice         = -1 * np.ones(L, dtype=np.int64)
-        self.locs            = -1 * np.ones(2*N, dtype=np.int64)
-        self.vels            = vels
-        self.rebinding_times = rebinding_times
-        self.unbinding_rates = unbinding_rates
+        self.L                  = L
+        self.N                  = N
+        self.lattice            = -1 * np.ones(L, dtype=np.int64)
+        self.locs               = -1 * np.ones(2*N, dtype=np.int64)
+        self.vels               = vels
+        self.rebinding_times    = rebinding_times
+        self.unbinding_rates    = unbinding_rates
         self.loading_sites_counts = np.zeros(L, dtype=np.int64)
-        self.lef_start_times = np.zeros(N, dtype=np.float64)
-        self.lef_lifetimes   = []#[[] for _ in range(self.N)] # List of lists, multiple contributions per LEF
+        self.lef_start_times    = np.zeros(N, dtype=np.float64)
+        self.lef_lifetimes      = []#[[] for _ in range(self.N)] # List of lists, multiple contributions per LEF
 
         if perms is None:
             self.perms = np.ones(L+1, dtype=np.float64)
@@ -373,7 +373,7 @@ cdef np.int64_t do_event(System system, Event_heap evheap, np.int64_t event_idx)
         # regenerate events for the loop itself and for its previous neighbours
         regenerate_all_loop_events(system, evheap, loop_idx)
 
-        # update the neighbours after the loop has moved
+        # update the neighbours after the loop has been removed
         regenerate_neighbours(system, evheap, prev_pos)
         regenerate_neighbours(system, evheap, prev_pos2)
         if status == 2 and system.lef_start_times[loop_idx] > 0:
