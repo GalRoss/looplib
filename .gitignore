@@ -47,3 +47,5 @@ looplib.egg-info/*
 *.h5
 *.parquet
 *.xml
+*.npz
+*.npy
