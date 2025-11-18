@@ -33,5 +33,11 @@ bacterium["loadingRates"] = loading_probs
 bacterium["rebindingTimes"] = 2
 bacterium["stepRate"] = step_rate
 bacterium["backstepRate"] = step_rate/contraction_rate_factor
+traverse_time = life_time/0.01              # Weird initial assumption that I want to make
+bypass_rate = float( 1./ ( traverse_time + 1./step_rate) )  # time is stall time plus mean step time
+bacterium["bypassRate"] = bypass_rate
+print(f"Bypass rate is: {bypass_rate} per minute. (Traverse time: {traverse_time} minutes ; Step time : {1./step_rate} minutes)")
 
-run_sims(bacterium, N, burn_in_time=burnin_time, simulation_time_min=total_time, num_sims=500, output_directory="LEF_paths/", delta_t_sec=20, results_dir_label= None)
+extra_label = "test_1"
+run_sims(bacterium, N, burn_in_time=burnin_time, simulation_time_min=total_time, num_sims=500,
+        output_directory="LEF_paths/", delta_t_sec=20, sim_type = 1 , results_dir_label= extra_label)

@@ -35,8 +35,16 @@ def check_or_create_directory(directory_path):
         os.makedirs(directory_path)
         print(f"Directory '{directory_path}' created.")
 
-def out_dir_name(bacterium, N, results_dir_label="No_Bypass"):
-    return results_dir_label + f"_{bacterium['name']}_L_{bacterium['N']}_SMCs_{N}"
+def out_dir_name(bacterium, N, sim_type = 0, results_dir_label= None):
+    if sim_type == 1:
+        sim_type_tag = "Bypass"
+    else:
+        sim_type_tag = "No_Bypass"
+    
+    name = sim_type_tag + f"_{bacterium['name']}_L_{bacterium['N']}_SMCs_{N}"
+    if results_dir_label is not None:
+        name = name + "_" + results_dir_label
+    return name
 
 
 def save_to_h5(l_sites, r_sites, ts, loading_site_probs, lef_lifetimes, filename='data.h5'):
@@ -69,9 +77,9 @@ def run_sims(bacterium, num_smcs, burn_in_time, simulation_time_min, num_sims, o
     delta_t = delta_t_sec/60
 
     if results_dir_label is not None:
-        results_dir = out_dir_name(bacterium, num_smcs, results_dir_label = results_dir_label)
+        results_dir = out_dir_name(bacterium, num_smcs, sim_type=sim_type, results_dir_label=results_dir_label)
     else:
-        results_dir = out_dir_name(bacterium, num_smcs)
+        results_dir = out_dir_name(bacterium, num_smcs, sim_type=sim_type)
 
     results_dir = os.path.join(output_directory, results_dir)
     check_or_create_directory(results_dir)
@@ -94,6 +102,8 @@ def run_sims(bacterium, num_smcs, burn_in_time, simulation_time_min, num_sims, o
         
         p['N_SNAPSHOTS'] = p['T_MAX'] // delta_t  
         p['PROCESS_NAME'] = b'Test'         # b'proc'
+        if sim_type == 1:
+            p["R_BYPASS"] = bacterium.get("bypassRate", 1)  # Default to stepRate if not provided
 
         t_start=time.perf_counter()
         l_sites, r_sites, ts, loading_sites_count, lef_lifetimes = lef_simulation.simulate(p, verbose=False) #perform a new simulation
